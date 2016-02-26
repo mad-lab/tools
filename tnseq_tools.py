@@ -1,43 +1,34 @@
 import sys
 import math
 import numpy
-
+import scipy.stats
 
 class Gene:
-    """
+    """This is a longer explanation, which may include math with latex syntax
+    Then, you need to provide optional subsection in this order (just to be
+    consistent and have a uniform documentation. Nothing prevent you to
+    switch the order):
 
-        This is a longer explanation, which may include math with latex syntax
-        Then, you need to provide optional subsection in this order (just to be
-        consistent and have a uniform documentation. Nothing prevent you to
-        switch the order):
-
-          - parameters using ``:param <name>: <description>``
-          - type of the parameters ``:type <name>: <description>``
-          - returns using ``:returns: <description>``
-          - examples (doctest)
-          - seealso using ``.. seealso:: text``
-          - notes using ``.. note:: text``
-          - warning using ``.. warning:: text``
-          - todo ``.. todo:: text``
+        - parameters using ``:param <name>: <description>``
+        - type of the parameters ``:type <name>: <description>``
+        - returns using ``:returns: <description>``
+        - examples (doctest)
+        - seealso using ``.. seealso:: text``
+        - notes using ``.. note:: text``
+        - warning using ``.. warning:: text``
+        - todo ``.. todo:: text``
 
 
-        :param orf: ORF ID. Must be unique.
-        :param name: Human readable name of the ORF.
-        :param reads: Read-counts data for the ORF.
-        :param position: Position of TA sites for the ORF
-        :param start: Start coordinate for the ORF.
-        :param end: End coordinate for the ORF.
-        :param strand: Strand for the ORF.
-        :type orf: string
-        :type name: string
-        :type reads: list
-        :type start: int
-        :type end: int
-        :type strand: string
-        :returns: Gene object with a information about the ORF.
-        :rtype: Gene object
+    Attributes:
+        orf (str): ORF ID. Must be unique.
+        name (str): Human readable name of the ORF.
+        reads (list): Read-counts data for the ORF.
+        position (list): Position of TA sites for the ORF.
+        start (int): Start coordinate for the ORF.
+        end (int): End coordinate for the ORF.
+        strand (str): Strand for the ORF.
 
-        :Example:
+    :Example:
 
         >>> import tnseq_tools
         >>> G = tnseq_tools.Gene("Rv0001", "dnaA", [[0,0,0,0,1,0,32]], start=1, end=1500, strand="+")
@@ -49,15 +40,15 @@ class Gene:
     """
 
     def __init__(self, orf, name, reads, position, start=0, end=0, strand=""):
-        """ """
+        """Initializes the Gene object."""
 
         self.orf = orf
         self.name = name
         self.start = start
         self.end = end
         self.strand = strand
-        self.reads = reads
-        self.position = position
+        self.reads = numpy.array(reads)
+        self.position = numpy.array(position)
         self.tosses = self.tossify()
         self.k = self.tosses.count("1")
         self.n = len(self.tosses)
@@ -66,49 +57,27 @@ class Gene:
         self.t = self.getlength()
 
     def __getitem__(self, i):
-        """Return read-counts at index i.
-
-        :param i: Index position
-        :type i: int
-        :returns: Read-counts at index i
-        :rtype: Gene object
-        """
+        """Return read-counts at position i."""
         return self.reads[:, i]
 
     def __unicode__(self):
-        """Return a string representation of the object"""
-        return "%s (%s): %d, %d, %d" % (self.orf, self.name, self.k, self.n, self.r)
+        """Return a string representation of the object."""
+        return "%s (%s): k=%d, n=%d, r=%d" % (self.orf, self.name, self.k, self.n, self.r)
 
     def theta(self):
-        """ Return the insertion density ("theta") for the gene.
-
-        :returns: Insertion density (i.e. Num of sites with insertions/ Total sites)
-        :rtype: float
-        """
+        """Return the insertion density ("theta") for the gene."""
         return float(self.k)/self.n
 
     def phi(self):
-        """ Return the non-insertion density ("phi") for the gene.
-
-        :returns: Non-insertion density (i.e. 1 - Num of sites with insertions/ Total sites)
-        :rtype: float
-        """
+        """ Return the non-insertion density ("phi") for the gene."""
         return 1.0 - self.theta()
 
     def total_reads(self):
-        """ Return the total reads for the gene.
-
-        :returns: Insertion density (i.e. Num of sites with insertions/ Total sites)
-        :rtype: float
-        """
+        """ Return the total reads for the gene."""
         return numpy.sum(self.reads, 1)
 
     def runs(self):
-        """ Return list of all the runs of consecutive non-insertions.
-
-        :returns: List of all the runs of consecutive non-insertions
-        :rtype: List
-        """
+        """ Return list of all the runs of consecutive non-insertions."""
         combined_reads = numpy.sum(self.reads, 0)
         runs = []
         current_r = 0
@@ -125,7 +94,8 @@ class Gene:
         return(runs)
 
     def calculate_span(self):
-       
+        """Caclulates the span based on the coordinates"""
+        # TODO: Check if it works.
         runs = self.runs()
         if len(self.raw_data) > 0:
             runs = self.runs(include_pos=True) or [(0,0)]
@@ -135,6 +105,8 @@ class Gene:
             return -1
 
     def calculate_length(self, raw_data):
+        """Caclulates the length based on the coordinates"""
+        # TODO: Check if it works.
         if len(self.raw_data) > 0:
             return(self.raw_data[-1][0] + 2 - self.raw_data[0][0])
         else:
@@ -171,159 +143,26 @@ class Genes:
         self.genes.append(gene)
 
     
-    def __init__(self, P="", M=None, L=None, NC = False, BS=False, MID = False, filetype="trash", protTable="", gff=""):
-        self.path = P
+    def __init__(self, wigList=[], protTable ="", M=None, L=None, NC = False, BS=False, MID = False):
+        self.wigList = wigList
         self.min_read = M
-        self.lanes = L
         self.nc = NC
         self.bs = BS
         self.mid = MID
-        self.filetype = filetype
         self.protTable = protTable
-        self.gffFile = gff
 
-        hash = None; orf2name = None;
-        if self.gffFile:
-            hash = hash_gff_genes(self.gffFile)
-            orf2name = get_gff_names(self.gffFile)
-        elif self.protTable:
-            hash = hash_prot_genes(self.protTable)
-            orf2name = get_prot_names(self.protTable)
-
-        if filetype.lower() == "trash":
-            self.genes = self.fromTrashFile()
-        elif filetype.lower() == "wig":
-            assert hash and orf2name, "Error: filetype %s requires a GFF file or protein table."
-            self.genes = self.fromWigFile(hash, orf2name)
-        elif filetype.lower() == "igv":
-            assert hash and orf2name, "Error: filetype %s requires a GFF file or protein table."
-            self.genes = self.fromIGVFile(hash, orf2name)
-        else:
-            self.genes = []
-            raise Exception("Error: Unknown file type: %s" % filetype) 
-
-
-    #@classmethod
-    def fromTrashFile(self):
-        """Returns list of Gene objects from TraSH formatted file"""
-        gene_list = []; last_gene = ""; reads = []; raw_data = []; tosses = ""; orf="";
-        count = 1
-        for line in open(self.path, "r"):
-            if line.startswith("#"): continue
-            if line.startswith("\n"): continue
-            tmp = line.split()
-            if not line.startswith(" "):
-                if raw_data and orf != "non-coding":
-                    gene_list.append( Gene(orf, name, tosses, raw_data, reads, -1, -1,"") )
-                elif orf == "non-coding" and self.nc:
-                    #print raw_data
-                    gene_list.append(Gene("non_coding_%d" % count,"-",tosses,raw_data,reads,-1,-1,""))
-                    count +=1
-                orf = tmp[0]; name = tmp[1]; raw_data = []; reads = []; tosses = "";
-                continue
-            if tmp[1] != "TA": continue
-            start = int(tmp[0])
-            if tmp[2].startswith("()") or tmp[2].startswith("|"): pos = 0.00
-            else:
-                pos = float(tmp[2][1:-1])
-            row = [map(int,x.split()) for x in line[:-2].strip().split("|")[1:]]
-            
-            read = 0
-            for i in self.lanes:
-                if not self.bs:
-                    read += sum(row[i-1])
-                else:
-                    if row[i-1][0] > 0 and row[i-1][1] > 0:
-                        read += sum(row[i-1])
-                    
-            if read >= self.min_read: tosses+="1"
-            else: tosses+="0"
-            raw_data.append( (int(tmp[0]), pos, "TA", read)   )
-            reads.append(read)
-        if orf == "non-coding" and self.nc:
-            gene_list.append(Gene("non_coding_%d" % count,"-",tosses,raw_data,reads,-1,-1,""))
+        hash = hash_prot_genes(self.protTable)
+        orf2name = get_prot_names(self.protTable)
         
-        return(gene_list)
-
-
-    #@classmethod
-    def fromWigFile(self, hash, orf2name):
-        """Returns list of Gene objects from Wig formatted file"""
-        gene2wig = {}
-        genes = []
-        nc_count = 1
-        for line in open(self.path):
-            if line.startswith("#"): continue
-            if line.startswith("variable"): continue
-            if line.startswith("location"): continue
-            loc,read = line.split(); loc = int(loc); read = int(read);
-            gene = hash.get(loc, "non_coding_%d" % nc_count)
-            if gene not in gene2wig:
-                if gene.startswith("non_coding"):
-                    nc_count+=1
-                genes.append(gene)
-                gene2wig[gene] = []
-            gene2wig[gene].append((loc, read))
-
-        gene_list = []
-        for gene in genes:
-            name = orf2name.get(gene, "-")
-            if not self.nc and gene.startswith("non"): continue
-            raw_reads = []
-            tosses = ""
-            reads = []
-            for loc,read in gene2wig[gene]:
-                if read >= self.min_read: tosses +="1"
-                else: tosses +="0"
-                raw_reads.append((loc, -1.00, "TA", read))
-                reads.append(read)
-            gene_list.append(Gene(gene, name, tosses, raw_reads, reads, -1, -1, ""))
-
-        return gene_list 
-            
-   
-    #@classmethod
-    def fromIGVFile(self, hash, orf2name):
-        """Returns list of Gene objects from IGV formatted file"""
-        gene2igv = {}
-        genes = []
-        nc_count = 1
-        for line in open(self.path):
-            if line.startswith("#"): continue
-            if line.startswith("Chromosome"):
-                for i,h  in enumerate(line.strip().split("\t")):
-                    if h.lower() == "start":
-                        s_pos = i
-                    if h.lower() == "reads":
-                        r_pos = i
-                continue
-            tmp = line.strip().split("\t"); loc = int(tmp[s_pos]); read = int(tmp[r_pos])
-            gene = hash.get(loc, "non_coding_%d" % nc_count)
-            if gene not in gene2igv:
-                if gene.startswith("non_coding"):
-                    nc_count+=1
-                genes.append(gene)
-                gene2igv[gene] = []
-            gene2igv[gene].append((loc, read))
-
-        gene_list = []
-        for gene in genes:
-            name = orf2name.get(gene, "-")
-            if not self.nc and gene.startswith("non"): continue
-            raw_reads = []
-            tosses = ""
-            reads = []
-            for loc,read in gene2igv[gene]:
-                if read >= self.min_read: tosses +="1"
-                else: tosses +="0"
-                raw_reads.append((loc, -1.00, "TA", read))
-                reads.append(read)
-            gene_list.append(Gene(gene, name, tosses, raw_reads, reads, -1, -1, ""))
-
-        return gene_list
-
-
+        self.orf2index = {}
+        self.genes = []
         
+        #Now read in the file.
+        (data, position) = get_data(self.wigList)
+        hash = get_pos_hash(self.protTable)
+                
+
+
     def k(self):
         """Returns numpy array with the number of insertions, 'k', for each gene FLORF"""
         G = len(self.genes)
@@ -446,6 +285,51 @@ class Genes:
     def getpath(self):
         """Return path to data file"""
         return(self.path)
+
+
+
+
+
+def get_data(wig_list):
+    """ Returns a tuple of (data, position) containing a matrix of raw read counts, and list of coordinates. """
+    K = len(wig_list)
+    T = 0
+    for line in open(wig_list[0]):
+        if line.startswith("#"): continue
+        if line.startswith("location"): continue
+        if line.startswith("variable"): continue
+        T+=1
+
+    data = numpy.zeros((K,T))
+    position = numpy.zeros(T)
+    for j,path in enumerate(wig_list):
+        reads = []
+        i = 0
+        for line in open(path):
+            if line.startswith("#"): continue
+            if line.startswith("location"): continue
+            if line.startswith("variable"): continue
+            tmp = line.split()
+            pos = int(tmp[0])
+            rd = float(tmp[1])
+            data[j,i] = rd
+            position[i] = pos
+            i+=1
+    return (data, position)
+
+
+def get_pos_hash(path):
+    hash = {}
+    for line in open(path):
+        if line.startswith("#"): continue
+        tmp = line.strip().split("\t")
+        orf = tmp[8]
+        start = int(tmp[1])
+        end = int(tmp[2])
+        for pos in range(start, end+1):
+            if pos not in hash: hash[pos] = []
+            hash[pos].append(orf)
+    return hash
 
 
 
