@@ -2,6 +2,7 @@ import sys
 import math
 import numpy
 import scipy.stats
+import transit_tools
 
 class Gene:
     """This is a longer explanation, which may include math with latex syntax
@@ -39,20 +40,22 @@ class Gene:
         .. seealso:: :class:`Genes`
     """
 
-    def __init__(self, orf, name, reads, position, start=0, end=0, strand=""):
+    def __init__(self, orf, name, desc, reads, position, start=0, end=0, strand=""):
         """Initializes the Gene object."""
 
         self.orf = orf
         self.name = name
+        self.desc = desc
         self.start = start
         self.end = end
         self.strand = strand
         self.reads = numpy.array(reads)
-        self.position = numpy.array(position)
-        self.tosses = self.tossify()
-        self.k = self.tosses.count("1")
+        self.position = numpy.array(position, dtype=int)
+        self.tosses = tossify(self.reads)
+        self.runs = runs(self.tosses)
+        self.k = int(numpy.sum(self.tosses))
         self.n = len(self.tosses)
-        self.r = maxrun(self.tosses)
+        self.r = numpy.max(self.runs)
         self.s = self.getspan()
         self.t = self.getlength()
 
@@ -60,13 +63,36 @@ class Gene:
         """Return read-counts at position i."""
         return self.reads[:, i]
 
-    def __unicode__(self):
+    def __str__(self):
         """Return a string representation of the object."""
-        return "%s (%s): k=%d, n=%d, r=%d" % (self.orf, self.name, self.k, self.n, self.r)
+        return "%s\t(%s)\tk=%d\tn=%d\tr=%d\ttheta=%1.5f" % (self.orf, self.name, self.k, self.n, self.r, self.theta())
+
+
+    def getspan(self):
+        """Returns the span of the maxrun of the gene (i.e. number of nucleotides)."""
+        if len(self.position) > 0:
+            index = runindex(self.runs)
+            maxii = numpy.argmax(self.runs)
+            runstart = index[maxii]
+            runend = runstart + max(self.runs) - 1
+            return self.position[runend] - self.position[runstart] + 2
+        else:
+            return 0
+        
+    
+    def getlength(self):
+        """Returns the number of nucleotides spanned by the gene."""
+        if len(self.position) > 0:
+            return self.position[-1] - self.position[0] + 2
+        return 0
+
 
     def theta(self):
         """Return the insertion density ("theta") for the gene."""
-        return float(self.k)/self.n
+        if self.n:
+            return float(self.k)/self.n
+        else:
+            return 0.0
 
     def phi(self):
         """ Return the non-insertion density ("phi") for the gene."""
@@ -76,22 +102,6 @@ class Gene:
         """ Return the total reads for the gene."""
         return numpy.sum(self.reads, 1)
 
-    def runs(self):
-        """ Return list of all the runs of consecutive non-insertions."""
-        combined_reads = numpy.sum(self.reads, 0)
-        runs = []
-        current_r = 0
-        for read in combined_reads:
-            if read > 0: # If ending a run of zeros
-                #if current_r > 0: # If we were in a run, add to list
-                runs.append(current_r)
-                current_r = 0
-            else:
-                current_r += 1
-        # If we ended in a run, add it
-        if current_r > 0:
-            runs.append(current_r)
-        return(runs)
 
     def calculate_span(self):
         """Caclulates the span based on the coordinates"""
@@ -108,7 +118,7 @@ class Gene:
         """Caclulates the length based on the coordinates"""
         # TODO: Check if it works.
         if len(self.raw_data) > 0:
-            return(self.raw_data[-1][0] + 2 - self.raw_data[0][0])
+            return self.raw_data[-1][0] + 2 - self.raw_data[0][0]
         else:
             return -1
 
@@ -117,177 +127,231 @@ class Gene:
 class Genes:
 
     def __getitem__(self, i):
+        """Defines __getitem__ method so that it works as dictionary and list."""
         if isinstance(i, int):
             return(self.genes[i])
+
         if isinstance(i, basestring):
-            for j in range(len(self.genes)):
-                if self.genes[j].orf == i:
-                    return(self.genes[j])
+            return self.genes[self.orf2index[i]]
 
 
     def __contains__(self, item):
-        for gene in self.genes:
-            if gene.orf == item: return(True)
-        return(False)
+        """Defines __contains__ to check if gene exists in the list."""
+        return item in self.orf2index
 
 
     def __len__(self):
-        return( len(self.genes) )
+        """Defines __len__ returning number of genes."""
+        return len(self.genes)
 
 
     def __str__(self):
-        return("Genes Object (N=%d)" % len(self.genes))
-
-
-    def add(self, gene):
-        self.genes.append(gene)
-
+        """Defines __str__ to print a generic str with the size of the list."""
+        return "Genes Object (N=%d)" % len(self.genes)
     
-    def __init__(self, wigList=[], protTable ="", M=None, L=None, NC = False, BS=False, MID = False):
+    def __init__(self, wigList, protTable, norm="nonorm", minread=1, ignoreCodon = True, nterm=0.0, cterm=0.0, include_nc = False):
+        """Initializes the gene list based on the list of wig files and a prot_table."""
         self.wigList = wigList
-        self.min_read = M
-        self.nc = NC
-        self.bs = BS
-        self.mid = MID
         self.protTable = protTable
+        self.norm = norm
+        self.minread = minread
+        self.ignoreCodon = ignoreCodon
+        self.nterm = nterm
+        self.cterm = cterm
+        self.include_nc = include_nc
 
-        hash = hash_prot_genes(self.protTable)
-        orf2name = get_prot_names(self.protTable)
-        
         self.orf2index = {}
         self.genes = []
         
-        #Now read in the file.
-        (data, position) = get_data(self.wigList)
-        hash = get_pos_hash(self.protTable)
+
+        orf2info = transit_tools.get_gene_info(self.protTable)
+        (data, position) = transit_tools.get_data(self.wigList)
+        hash = transit_tools.get_pos_hash(self.protTable)
+        (data, factors) = transit_tools.normalize_data(data, norm, self.wigList, self.protTable)
+        
+        K,N = data.shape
+
+        orf2posindex = {}
+        visited_list = []
+        for i in range(N):
+            genes_with_coord = hash.get(position[i], [])
+            for gene in genes_with_coord:
+                if gene not in orf2posindex: visited_list.append(gene)
+                if gene not in orf2posindex: orf2posindex[gene] = []
+
+                name,desc,start,end,strand = orf2info.get(gene, ["", "", 0, 0, "+"])
                 
+                if strand == "+":
+                    if self.ignoreCodon and position[i] > end - 3:
+                        continue
+                else:
+                    if self.ignoreCodon and position[i] < start + 3:
+                        continue
+
+                if (position[i]-start)/float(end-start) < (self.nterm/100.0):
+                    continue
+                
+                if (position[i]-start)/float(end-start) > ((100-self.cterm)/100.0):
+                    continue
+
+                orf2posindex[gene].append(i)
+
+        count = 0
+        for line in open(self.protTable):
+            tmp = line.split("\t")
+            gene = tmp[8]
+            name,desc,start,end,strand = orf2info.get(gene, ["", "", 0, 0, "+"])
+            posindex = orf2posindex.get(gene, [])
+            if posindex:
+                pos_start = orf2posindex[gene][0]
+                pos_end = orf2posindex[gene][-1]
+                self.genes.append(Gene(gene, name, desc, data[:, pos_start:pos_end+1], position[pos_start:pos_end+1], start, end, strand))
+            else:
+                self.genes.append(Gene(gene, name, desc, numpy.array([[]]), numpy.array([]), start, end, strand))
+            self.orf2index[gene] = count
+            count += 1
 
 
-    def k(self):
-        """Returns numpy array with the number of insertions, 'k', for each gene FLORF"""
+    def local_insertions(self):
+        """Returns numpy array with the number of insertions, 'k', for each gene."""
         G = len(self.genes)
-        K = numpy.zeros(G, dtype=int)
+        K = numpy.zeros(G)
         for i in xrange(G):
             K[i] = self.genes[i].k
-        return(K)
+        return K
 
 
-    def n(self):
-        """Returns numpy array with total number of TA sites, 'n', for each gene"""
+    def local_sites(self):
+        """Returns numpy array with total number of TA sites, 'n', for each gene."""
         G = len(self.genes)
-        N = numpy.zeros(G, dtype=int)
+        N = numpy.zeros(G)
         for i in range(G):
             N[i] = self.genes[i].n
-        return(N)
+        return N
 
 
-    def r(self):
-        """Returns numpy array with total number of TA sites, 'r', for each gene"""
+    def local_runs(self):
+        """Returns numpy array with total number of TA sites, 'r', for each gene."""
         G = len(self.genes)
-        R = numpy.zeros(G, dtype=int)
+        R = numpy.zeros(G)
         for i in xrange(G):
             R[i] = self.genes[i].r
-        return(R)
+        return R 
 
 
-    def reads(self):
-        """Returns numpy array of lists containing the read counts for each gene"""
+    def local_reads(self):
+        """Returns numpy array of lists containing the read counts for each gene."""
         all_reads = []
         G = len(self.genes)
         for i in xrange(G):
             all_reads.extend(self.genes[i].reads)
-        return(numpy.array(all_reads))
+        return numpy.array(all_reads)
 
 
-    def theta(self):
-        """Returns numpy array of insertion frequencies, 'theta', for each gene"""
+    def local_thetas(self):
+        """Returns numpy array of insertion frequencies, 'theta', for each gene."""
         G = len(self.genes)
         theta = numpy.zeros(G)
         for i in xrange(G):
             theta[i] = self.genes[i].theta()
-        return(theta)
+        return theta
 
 
-    def phi(self):
-        """Returns numpy array of non-insertion frequency, 'phi', for each gene"""
-        return(1.0 - self.theta())
+    def local_phis(self):
+        """Returns numpy array of non-insertion frequency, 'phi', for each gene."""
+        return 1.0 - self.theta()
 
 
-    def global_theta(self):
-        """Returns global insertion frequency, of the library"""
-        return( float(sum(self.k()))/sum(self.n()) )
+    ######
 
+    def global_insertion(self):
+        """Returns total number of insertions, i.e. sum of 'k' over all genes."""
+        G = len(self.genes)
+        total = 0
+        for i in xrange(G):
+            total += self.genes[i].k
+        return total
 
-    def global_phi(self):
-        """Returns global non-insertion frequency, of the library"""
-        return(1.0 - self.global_theta())
+    def global_sites(self):
+        """Returns total number of sites, i.e. sum of 'n' over all genes."""
+        G = len(self.genes)
+        total = 0
+        for i in xrange(G):
+            total += self.genes[i].n
+        return total
 
+    def global_run(self):
+        """Returns the run assuming all genes were concatenated together."""
+        return maxrun(self.tosses())
 
     def global_reads(self):
-        """Returns total reads among the library"""
+        """Returns the reads among the library."""
+        return self.data
+
+    def global_theta(self):
+        """Returns global insertion frequency, of the library."""
+        return float(self.global_insertion())/self.global_sites()
+
+    def global_phi(self):
+        """Returns global non-insertion frequency, of the library."""
+        return 1.0 - self.global_theta()
+
+    def total_reads(self):
+        """Returns total reads among the library."""
         reads_total = 0
         for g in self.genes:
             reads_total += g.total_reads()
-        return(reads_total)
-
-
-    def mid_reads(self):
-        """Returns list of reads in middle region (5%-80%) in all genes"""
-        mid_list = []
-        for g in self.genes:
-            mid_list.extend(g.mid_reads())
-        return(numpy.array(mid_list))
-
+        return reads_total
 
     def tosses(self):
-        """Returns list of bernoulli trials, 'tosses', representing insertions in the gene"""
-        reads = self.reads()
-        t = []
-        for r in reads:
-            if r >= self.min_read: t.append(1)
-            else: t.append(0)   
-        return(t)
+        """Returns list of bernoulli trials, 'tosses', representing insertions in the gene."""
+        all_tosses = []
+        for g in self.genes:
+            all_tosses.extend(g.tosses)
+        return all_tosses
 
 
-    def runs(self):
-        """Returns list of all runs in a gene"""
-        reads = self.reads()
-        runs = []; current_r = 0;
-        for read in reads:
-            if read >= self.min_read:
-                if current_r > 0: runs.append(current_r)
-                current_r = 0
-            else:
-                current_r += 1
-        if current_r > 0:
+
+
+def tossify(data):
+    """Reduces the data into Bernoulli trials (or 'tosses') based on whether counts were observed or not."""
+    K,N = data.shape
+    reduced = numpy.sum(data,0)
+    return numpy.zeros(N) + (numpy.sum(data, 0) > 0)
+
+
+def runs(data):
+    """Return list of all the runs of zero, given a list of counts."""
+    if len(data) == 0: return [0]
+    runs = []
+    current_r = 0
+    for read in data:
+        if read > 0: # If ending a run of zeros
+            #if current_r > 0: # If we were in a run, add to list
             runs.append(current_r)
-        return(runs)
+            current_r = 0
+        else:
+            current_r += 1
+    # If we ended in a run, add it
+    if current_r > 0:
+        runs.append(current_r)
+    return runs
 
-
-    def sites(self):
-        """Returns list of TA sites in the gene"""
-        sites = []
-        for gene in self.genes:
-            for read in gene.raw_data:
-                sites.append(read[0])
-        return(sites)
-
-
-    def site2reads(self):
-        """Returns dictionary of ta sites to reads in the gene"""
-        ta_sites = {}
-        for gene in self.genes:
-            for read in gene.raw_data:
-                ta_sites[read[0]] = read[-1]
-        return(ta_sites)
-
-
-    def getpath(self):
-        """Return path to data file"""
-        return(self.path)
-
-
-
+def runindex(runs):
+    """Returns a list of the indexes of the start of the runs; complements runs()."""
+    index = 0
+    index_list = []
+    runindex = 0
+    for r in runs:
+        for i in range(r):
+            if i == 0:
+                runindex = index
+            index+=1
+        if r == 0:
+            runindex = index
+            index+=1
+        index_list.append(runindex)
+    return index_list
 
 
 def get_data(wig_list):
@@ -319,6 +383,7 @@ def get_data(wig_list):
 
 
 def get_pos_hash(path):
+    """Returns a dictionary that maps coordinates to a list of genes that occur at that coordinate."""
     hash = {}
     for line in open(path):
         if line.startswith("#"): continue
@@ -369,55 +434,7 @@ def fdr_thresholds(Z_raw, ALPHA=0.05):
     return(ess_threshold, noness_threshold)
 
 
-def hash_gff_genes(path):
-    hash = {}
-    for line in open(path):
-        if line.startswith("#"): continue
-        tmp = line.strip().split("\t")
-        if tmp[2] != "gene": continue
-        features = dict([tuple(f.split("=")) for f in tmp[8].split(";")])
-        start, end = int(tmp[3]), int(tmp[4])
-        for i in range(start,end+1):
-            #if i not in hash:
-            #    hash[i] = features.get("ID", "missing")
-            hash[i] = features.get("ID", "missing")
-    return hash
-
-
-def hash_prot_genes(path):
-    hash = {}
-    for line in open(path):
-        if line.startswith("#"): continue
-        tmp = line.strip().split("\t")
-        start, end = int(tmp[1]), int(tmp[2])
-        for i in range(start,end+1):
-            #if i not in hash:
-            #    hash[i] = tmp[8]
-            hash[i] = tmp[8]
-    return hash
-
-
-def get_gff_names(path):
-    orf2name = {}
-    for line in open(path):
-        if line.startswith("#"): continue
-        tmp = line.split("\t")
-        if tmp[2] != "gene": continue
-        features = dict([tuple(f.split("=")) for f in tmp[8].strip().split(";")])
-        orf2name[features.get("ID", "missing")] = features.get("Name", "-")
-    return(orf2name)
-
-
-def get_prot_names(path):
-    orf2name = {}
-    for line in open(path):
-        if line.startswith("#"): continue
-        tmp = line.strip().split("\t")
-        orf2name[tmp[8]] = tmp[7]
-    return(orf2name)
-
-
-def maxrun(lst,item="0"):
+def maxrun(lst,item=0):
     best = 0
     i,n = 0,len(lst)
     while i<n:
@@ -511,6 +528,36 @@ def trash_analysis(trash_data, p, gene2name = {}, gene2other_ess ={}):
             results[gene] =  [gene, gene2name.get(gene,"-"), insert_count,n,maxrun, "%1.3f" % ExpectedRuns(n, p), "%1.3f" % math.pow(VarR(n, p),0.5),  "%1.5f" %(1-Gumbel(maxrun,u,B)),gene2other_ess.get(gene,"no-data")]
         
     return(results)
+
+
+
+
+
+if __name__ == "__main__":
+
+    G = Genes(sys.argv[1].split(","), sys.argv[2])
+    print "#Insertion: %s" % G.global_insertion()
+    print "#Sites: %s" % G.global_sites()
+    print "#Run: %s" % G.global_run()
+    print "#Theta: %1.4f" % G.global_theta()
+    print "#Phi: %1.4f" % G.global_phi()
+    
+    orf = "Rv0016c"
+    print G[orf]
+    print G[orf].reads
+    print G[orf].position
+    print G[orf].t
+
+
+    for gene in G:
+        k = gene.k
+        n = gene.n
+        r = gene.r
+        s = gene.s
+        t = gene.t
+        pos = gene.position
+        #print "%s" % gene
+        print "%s\t%s\t%s\t%s\t%s\t%s\t%s" % (gene.orf, gene.desc, k, n, r, s, t)
 
 
 
