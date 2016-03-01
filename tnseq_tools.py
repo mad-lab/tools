@@ -448,14 +448,6 @@ def maxrun(lst,item=0):
     return best
 
 
-def isNumber(num):
-    try:
-        x = float(num)
-        return(True)
-    except:
-        return(False)
-
-
 def getR1(n):
     """Small Correction term. Defaults to 0.000016 for now"""
     return(0.000016)
@@ -482,7 +474,11 @@ def getGamma():
 
     
 def ExpectedRuns(n,p):
-    """ER_n =  log(1/p)(nq) + gamma/ln(1/p) -1/2 + r1(n) + E1(n) (Schilling, 1990)"""    
+    """Expected value of the run of non=insertions (Schilling, 1990):
+    
+        ER_n =  log(1/p)(nq) + gamma/ln(1/p) -1/2 + r1(n) + E1(n)
+
+    """   
     q = 1-p
     gamma = getGamma()
     r1 = getR1(n)
@@ -494,7 +490,11 @@ def ExpectedRuns(n,p):
     
 
 def VarR(n,p):
-    """ VarR_n =  (pi^2)/(6*ln(1/p)^2) + 1/12 + r2(n) + E2(n) (Schilling, 1990)"""
+    """Variance of the expected run of non-insertons (Schilling, 1990):
+ 
+        VarR_n =  (pi^2)/(6*ln(1/p)^2) + 1/12 + r2(n) + E2(n)
+
+    """
     r2 = getR2(n)
     E2 = getE2(n)    
     A = math.pow(math.pi,2.0)/(6* math.pow(math.log(1.0/p),2.0))
@@ -502,31 +502,53 @@ def VarR(n,p):
     return V
 
     
-def Gumbel(x,u,B):
-    """CDF of the Gumbel distribution
-     e^(-e^( (u-x)/B)) """
+def GumbelCDF(x,u,B):
+    """CDF of the Gumbel distribution:
+
+        e^(-e^( (u-x)/B))
+
+    """
     return (math.exp( -1 * math.exp((u-x)/B )))
     
 
-def trash_analysis(trash_data, p, gene2name = {}, gene2other_ess ={}):
-    q = 1 - p
-    results = {}
-    gene_list = trash_data.keys()
+def griffin_analysis(genes_obj, pins):
+    """Implements the basic Gumbel analysis of runs of non-insertion, described
+     in Griffin et al. 2011.
 
-    #for gene ORF in the gene2info...
-    for gene in gene_list:
-        
-        insert_count = trash_data[gene][0]
-        n = trash_data[gene][1]
-        maxrun = trash_data[gene][2]
+    This analysis method calculates a p-value of observing the maximun run of
+    TA sites without insertions in a row (i.e. a "run", r). Unusually long
+    runs are indicative of an essential gene or protein domain. Assumes that
+    there is a constant, global probability of observing an insertion
+    (tantamount to a Bernoulli probability of success).
 
-        if n == 0:
-            results[gene] = [gene, gene2name.get(gene,"-"), insert_count,n,maxrun,"-","-", "-",gene2other_ess.get(gene,"-")]
+    Args:
+        genes_obj (Genes): An object of the Genes class defining the genes.
+        pins (float): The probability of insertion.
+
+    Returns:
+        list. List of lists with results and information for the genes. The
+            elements of the list are as follows:
+            - ORF ID.
+            - Gene Name.
+            - Gene Description.
+            - Number of TA sites with insertions.
+            - Number of TA sites.
+            - Length of largest run of non-insertion.
+            - Expected run for a gene this size.
+            - p-value of the observed run.
+    """
+
+    pnon = 1.0 - pins
+    results = []
+    for gene in genes_obj:
+        if gene.n == 0:
+            results.append([gene.orf, gene.name, gene.desc, gene.k, gene.n, gene.r, 0.0, 1.000])
         else:
-            B = 1/math.log(1/p)
-            u = math.log(n*q,1/p)
-            results[gene] =  [gene, gene2name.get(gene,"-"), insert_count,n,maxrun, "%1.3f" % ExpectedRuns(n, p), "%1.3f" % math.pow(VarR(n, p),0.5),  "%1.5f" %(1-Gumbel(maxrun,u,B)),gene2other_ess.get(gene,"no-data")]
-        
+            B = 1.0/math.log(1.0/pnon)
+            u = math.log(gene.n*pins, 1.0/pnon)
+            exprun = ExpectedRuns(gene.n, pnon)
+            pval = 1.0 - GumbelCDF(gene.r, u, B)
+            results.append([gene.orf, gene.name, gene.desc, gene.k, gene.n, gene.r, exprun, pval])
     return(results)
 
 
@@ -542,22 +564,12 @@ if __name__ == "__main__":
     print "#Theta: %1.4f" % G.global_theta()
     print "#Phi: %1.4f" % G.global_phi()
     
-    orf = "Rv0016c"
-    print G[orf]
-    print G[orf].reads
-    print G[orf].position
-    print G[orf].t
+    griffin_results = griffin_analysis(G, G.global_theta())
 
-
-    for gene in G:
-        k = gene.k
-        n = gene.n
-        r = gene.r
-        s = gene.s
-        t = gene.t
+    for i,gene in enumerate(G):
         pos = gene.position
-        #print "%s" % gene
-        print "%s\t%s\t%s\t%s\t%s\t%s\t%s" % (gene.orf, gene.desc, k, n, r, s, t)
+        exprun, pval = gumbel_results[i][-2:]
+        print "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (gene.orf, gene.desc, gene.k, gene.n, gene.r, gene.s, gene.t, exprun, pval)
 
 
 
