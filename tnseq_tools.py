@@ -1,8 +1,17 @@
 import sys
 import math
+import warnings
 import numpy
 import scipy.stats
-import transit_tools
+
+
+try:
+    import norm_tools
+    noNorm = False
+except ImportError:
+    noNorm = True
+    warnings.warn("Problem importing the norm_tools.py module. Read-counts will not be normalized.")
+
 
 class Gene:
     """This is a longer explanation, which may include math with latex syntax
@@ -56,8 +65,8 @@ class Gene:
         self.k = int(numpy.sum(self.tosses))
         self.n = len(self.tosses)
         self.r = numpy.max(self.runs)
-        self.s = self.getspan()
-        self.t = self.getlength()
+        self.s = self.get_gap_span()
+        self.t = self.get_gene_span()
 
     def __getitem__(self, i):
         """Return read-counts at position i."""
@@ -68,7 +77,7 @@ class Gene:
         return "%s\t(%s)\tk=%d\tn=%d\tr=%d\ttheta=%1.5f" % (self.orf, self.name, self.k, self.n, self.r, self.theta())
 
 
-    def getspan(self):
+    def get_gap_span(self):
         """Returns the span of the maxrun of the gene (i.e. number of nucleotides)."""
         if len(self.position) > 0:
             index = runindex(self.runs)
@@ -80,7 +89,7 @@ class Gene:
             return 0
         
     
-    def getlength(self):
+    def get_gene_span(self):
         """Returns the number of nucleotides spanned by the gene."""
         if len(self.position) > 0:
             return self.position[-1] - self.position[0] + 2
@@ -160,14 +169,18 @@ class Genes:
         self.cterm = cterm
         self.include_nc = include_nc
 
+
         self.orf2index = {}
         self.genes = []
         
-
-        orf2info = transit_tools.get_gene_info(self.protTable)
-        (data, position) = transit_tools.get_data(self.wigList)
-        hash = transit_tools.get_pos_hash(self.protTable)
-        (data, factors) = transit_tools.normalize_data(data, norm, self.wigList, self.protTable)
+        orf2info = get_gene_info(self.protTable)
+        (data, position) = get_data(self.wigList)
+        hash = get_pos_hash(self.protTable)
+       
+        if not noNorm: 
+            (data, factors) = norm_tools.normalize_data(data, norm, self.wigList, self.protTable)
+        else:
+            factors = []
         
         K,N = data.shape
 
@@ -231,13 +244,30 @@ class Genes:
 
 
     def local_runs(self):
-        """Returns numpy array with total number of TA sites, 'r', for each gene."""
+        """Returns numpy array with maximum run of non-insertions, 'r', for each gene."""
         G = len(self.genes)
         R = numpy.zeros(G)
         for i in xrange(G):
             R[i] = self.genes[i].r
         return R 
 
+    def local_gap_span(self):
+        """Returns numpy array with the span of nucleotides of the largest gap,
+        's', for each gene."""
+        G = len(self.genes)
+        S = numpy.zeros(G)
+        for i in xrange(G):
+            S[i] = self.genes[i].s
+        return S
+  
+    def local_gene_span(self):
+        """Returns numpy array with the span of nucleotides of the gene,
+        't', for each gene."""
+        G = len(self.genes)
+        T = numpy.zeros(G)
+        for i in xrange(G):
+            T[i] = self.genes[i].t
+        return T
 
     def local_reads(self):
         """Returns numpy array of lists containing the read counts for each gene."""
@@ -396,43 +426,19 @@ def get_pos_hash(path):
             hash[pos].append(orf)
     return hash
 
-
-
-def fdr_thresholds(Z_raw, ALPHA=0.05):
-    Z = sorted(Z_raw)[::-1]
-    W = [1.0 - z for z in Z]
-    N = len(Z)
-
-    ess_threshold = 1.0
-
-    INDEX = range(3, N+1)
-    count = 0
-    for i in INDEX:
-        count +=1
-        wi = 1 - Z[i-1]
-        ai_n = (ALPHA*i)/N
-        mean_wi = sum(W[0:i-2])/float(len(W[0:i-2]))
-        delta_w = wi - mean_wi
-        if delta_w > ai_n:
-            ess_threshold = Z[i-1]
-            break
-
-    noness_threshold = 0
-    count = 0
-    INDEX = range(0, N+1)
-    INDEX.sort(reverse=True)
-    for i in INDEX:
-        wi = Z[N-i+1]
-        ai_n = (ALPHA*i)/N
-        mean_wi = sum(Z[N-i+1:])/float(len(Z[N-i+1:]))
-        delta_w = Z[N-i+1] - mean_wi
-        count +=1
-        if ai_n > delta_w:
-            break
-        noness_threshold = Z[N-i]
-
-    return(ess_threshold, noness_threshold)
-
+def get_gene_info(path):
+    orf2info = {}
+    for line in open(path):
+        if line.startswith("#"): continue
+        tmp = line.strip().split("\t")
+        orf = tmp[8]
+        name = tmp[7]
+        desc = tmp[0]
+        start = int(tmp[1])
+        end = int(tmp[2])
+        strand = tmp[3]
+        orf2info[orf] = (name, desc, start, end, strand)
+    return orf2info
 
 def maxrun(lst,item=0):
     best = 0
@@ -557,7 +563,7 @@ def griffin_analysis(genes_obj, pins):
 
 if __name__ == "__main__":
 
-    G = Genes(sys.argv[1].split(","), sys.argv[2])
+    G = Genes(sys.argv[1].split(","), sys.argv[2], norm="TTR")
     print "#Insertion: %s" % G.global_insertion()
     print "#Sites: %s" % G.global_sites()
     print "#Run: %s" % G.global_run()
@@ -568,8 +574,8 @@ if __name__ == "__main__":
 
     for i,gene in enumerate(G):
         pos = gene.position
-        exprun, pval = gumbel_results[i][-2:]
-        print "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (gene.orf, gene.desc, gene.k, gene.n, gene.r, gene.s, gene.t, exprun, pval)
+        exprun, pval = griffin_results[i][-2:]
+        print "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%1.1f\t%1.5f" % (gene.orf, gene.name, gene.k, gene.n, gene.r, gene.s, gene.t, exprun, pval)
 
 
 
