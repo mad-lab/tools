@@ -229,20 +229,18 @@ class GoTerms:
 if __name__ == "__main__":
 
 
+    # Example on how to use the GoTerms Class
+    # GOPATH is a path to the desired .obo file
+
+    print "Using .obo file: %s" % GOPATH
     G = GoTerms(GOPATH)
     N = len(G)
+    print ""
     print G
     print "Size: %d" % N
     print "First Term: %s" % G[0]
     print "Last Term: %s" % G[N-1]
 
-
-    print "ID\tHeight\tChildren"
-    print "%s\t%s\t%s" % (G.root, G.get_height(G.root), ",".join(G[G.root].children))
-    for c in G.children[G.root]:
-        print "%s\t%s\t%s" % (c, G.get_height(c), ",".join(G[c].children))
-    print ""
-    
     ii = random.randint(0,N+1)
     ID = G[ii].id
     print "Random Term: %s" % G[ii]
