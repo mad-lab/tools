@@ -1,4 +1,7 @@
 import sys
+import numpy
+import scipy.stats
+import scipy.optimize
 import warnings
 
 
@@ -19,7 +22,9 @@ def normalize_data(data, method="nonorm", wigList=[], annotationPath=""):
         list: List containing the normalization factors. Empty if not used.
     """
     factors = []
-    if method == "nzmean":
+    if method == "nonorm":
+        pass
+    elif method == "nzmean":
         factors = nzmean_factors(data)
         data = factors * data
     elif method == "totreads":
@@ -44,8 +49,8 @@ def normalize_data(data, method="nonorm", wigList=[], annotationPath=""):
         factors = emphist_factors(wigList, annotationPath)
         data = factors * data
     else:
-        method = "nonorm"
-        warnings.warn("Normalization method '%s' is unknown. Read-counts were not normalized." % method)
+        warnstr = "Normalization method '%s' is unknown. Read-counts were not normalized." % (method)
+        warnings.warn(warnstr)
     return (data, factors)
 
 def nzmean_factors(data):
