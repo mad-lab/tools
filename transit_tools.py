@@ -79,6 +79,24 @@ def basename(filepath):
     return ntpath.basename(filepath)
 
 
+def cleanargs(rawargs):
+    args = []
+    kwargs = {}
+    count = 0
+    while count < len(rawargs):
+        if rawargs[count].startswith("-"):
+            try:
+                kwargs[rawargs[count][1:]] = rawargs[count+1]
+                count += 1
+            except IndexError as IE:
+                kwargs[rawargs[count][1:]] = True
+        else:
+            args.append(rawargs[count])
+        count += 1
+
+    return (args, kwargs)
+
+
 def get_pos_hash(path):
     hash = {}
     for line in open(path):
@@ -121,8 +139,26 @@ def get_data(wig_list):
     return (data, position)
 
 
+def combine_replicates(data, method="Sum"):
 
-def normalize_data(data, method="nonorm", ctrlList=[], expList=[], annotationPath=""):
+    if method == "Sum":
+        combined = numpy.round(numpy.sum(data,0))
+    elif method == "Mean":
+        combined = numpy.round(numpy.mean(data,0))
+    elif method == "TTRMean":
+        factors = transit_tools.TTR_factors(data)
+        data = factors * data
+        target_factors = transit_tools.norm_to_target(data, 100)
+        data = target_factors * data
+        combined = numpy.round(numpy.mean(data,0))
+    else:
+        combined = data[0,:]
+
+    return combined
+
+
+
+def normalize_data(data, method="nonorm", wigList=[], annotationPath=""):
 
     factors = []
     if method == "nzmean":
@@ -147,7 +183,7 @@ def normalize_data(data, method="nonorm", ctrlList=[], expList=[], annotationPat
         assert ctrlList != None, "Control list cannot be empty!"
         assert expList != None, "Experimental list cannot be empty!"
         assert annotationPath != "", "Annotation path cannot be empty!"
-        factors = emphist_factors(ctrlList + expList, annotationPath)
+        factors = emphist_factors(wigList, annotationPath)
         data = factors * data
     else:
         method = "nonorm"
@@ -238,11 +274,14 @@ def aBGC_norm(data, doTotReads = True, bgsamples = 200000):
             rho = 1.0/(scipy.stats.trim_mean(nzdata, frac))
             rho_to_fit = rho
 
-            A = (numpy.sum(numpy.power(numpy.log(1.0-tQ),2)))/(numpy.sum(nzdata*numpy.log(1.0-tQ)))
-            Kp = (2.0 * numpy.exp(A) - 1)   /(numpy.exp(A) + rho - 1)
-
-            temp = scipy.stats.geom.rvs(scipy.stats.beta.rvs(Kp*rho, Kp*(1-rho), size=S), size=S)
-
+            try:
+                A = (numpy.sum(numpy.power(numpy.log(1.0-tQ),2)))/(numpy.sum(nzdata*numpy.log(1.0-tQ)))
+                Kp = (2.0 * numpy.exp(A) - 1)   /(numpy.exp(A) + rho - 1)
+                temp = scipy.stats.geom.rvs(scipy.stats.beta.rvs(Kp*rho, Kp*(1-rho), size=S), size=S)
+            except Except as e:
+                print "aBGC Error:", str(e)
+                print "%rho=s\tKp=%s\tA=%s" % (rho, Kp, A)
+                temp = scipy.stats.geom.rvs(0.01, size=S)
 
             corrected_nzdata = [cleaninfgeom(scipy.stats.geom.ppf(ecdf(temp, x), rho_to_fit), rho_to_fit) for x in nzdata]
             corrected_nzmean = numpy.mean(corrected_nzdata)
@@ -385,12 +424,17 @@ def betageom_norm(data, doNZMean = True, bgsamples=200000):
         eX = numpy.array([rd for rd in data[j]])
         eX.sort()
 
-        rho = 1.0/scipy.stats.trim_mean(eX, 0.001)
+        rho = max(1.0/scipy.stats.trim_mean(eX+1, 0.001), 0.0001)
         A = (numpy.sum(numpy.power(numpy.log(1.0-tQ),2)))/(numpy.sum(eX*numpy.log(1.0-tQ)))
-        Kp = (2.0 * numpy.exp(A) - 1)   /(numpy.exp(A) + rho - 1)
+        Kp = max((2.0 * numpy.exp(A) - 1)   /(numpy.exp(A) + rho - 1), 10)
     
-        
-        BGsample = scipy.stats.geom.rvs(scipy.stats.beta.rvs(Kp*rho, Kp*(1-rho), size=bgsamples), size=bgsamples)
+        try:
+            BGsample = scipy.stats.geom.rvs(scipy.stats.beta.rvs(Kp*rho, Kp*(1-rho), size=bgsamples), size=bgsamples)
+        except Exception as e:
+            print "BGC ERROR with rho=%f, Kp=%f, A=%s" % (rho, Kp, A)
+            print str(e)
+            BGsample = scipy.stats.geom.rvs(rho, size=bgsamples)
+
         for i in range(N):
             norm_data[j,i] = cleaninfgeom(scipy.stats.geom.ppf(ecdf(BGsample, data[j,i]), 1.0/grand_mean), 1.0/grand_mean)
 
