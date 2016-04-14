@@ -2,7 +2,7 @@ import math
 import numpy
 import scipy.stats
 
-def normalize(X, new_min, new_max, old_min=None, old_max=None):
+def transformToRange(X, new_min, new_max, old_min=None, old_max=None):
 
     if old_min == None:
         old_min = min(X)
@@ -42,11 +42,13 @@ def comb(n, k):
 
 
 def norm(x, mu,sigma):
+    """Normal distribution"""
     sigma = float(sigma)
     return(1/(sigma*(math.sqrt(2*math.pi))) * math.exp( -0.5 * math.pow( (x-mu)/sigma,2)))
 
 
 def binom(k,n,p):
+    """Binomial distribution. Uses Normal approximation for large 'n' """
     if n >= 100:
         return(norm(k, n*p, math.sqrt(n*p*(1-p)) ) )
     else:
@@ -54,10 +56,12 @@ def binom(k,n,p):
 
 
 def binom_cdf(k,n,p):
+    """CDF of the binomial distribution"""
     return(sum([binom(i,n,p) for i in range(0,k+1)]))
 
 
 def binom_test(k,n,p, type="two-sided"):
+    """Does a binomial test given success, trials and probability."""
     if type == "less": return(binom_cdf(k,n,p))
     elif type == "greater": return(1-binom_cdf(k-1,n,p))
     else:
@@ -78,6 +82,7 @@ def binom_test(k,n,p, type="two-sided"):
                 return(binom_cdf(y-1,n,p) + (1-binom_cdf(k-1,n,p)))
 
 def regress(X,Y):
+    """Performs linear regression given two vectors, X, Y."""
     N = len(X)
     xbar = numpy.average(X)
     ybar = numpy.average(Y)
@@ -135,6 +140,7 @@ def boxcoxTable(X, minlambda, maxlambda, dellambda):
     return out  
 
 def phi_coefficient(X,Y):
+    """Calculates the phi-coefficient for two bool arrays"""
     N = len(X)
     assert len(X) == len(Y), "Length of arrays must be equal"
     x1y1 = sum([int(X[j]) == int(Y[j])  ==  1 for j in range(N)])
@@ -146,10 +152,10 @@ def phi_coefficient(X,Y):
     y1 = x1y1 + x0y1
     y0 = x1y0 + x0y0
     phi_coeff = (x1y1*x0y0 - x1y0*x0y1)/math.sqrt(x1*x0*y1*y0)
-
     return phi_coeff
 
-def fdr_corrected_pval(X):
+def BH_fdr_correction(X):
+    """Adjusts p-values using the Benjamini Hochberg procedure"""
     n = len(X)
     qvalues = numpy.zeros(n)
     pvalues = numpy.array(X)
@@ -167,7 +173,8 @@ def fdr_corrected_pval(X):
     p2qval = dict([(p,q) for (p,q) in zip(pvalues,qvalues)])
     return numpy.array([p2qval[p] for p in X])
 
-def fdr_post_prob(Z_raw, ALPHA=0.05):
+def bayesian_ess_thresholds(Z_raw, ALPHA=0.05):
+    """Returns Essentiality Thresholds using a BH-like procedure"""
     Z = numpy.sort(Z_raw)[::-1]
     W = 1 - Z
     N = len(Z)
@@ -219,7 +226,7 @@ def F_shuffle_flat(X):
     return numpy.random.permutation(X)
 
 def resampling(data1, data2, S=10000, testFunc=F_mean_diff_flat,
-            permFunc=F_shuffle_flat):
+            permFunc=F_shuffle_flat, adaptive=False):
     """Does a permutation test on two sets of data.
 
     Performs the resampling / permutation test given two sets of data using a
@@ -236,6 +243,7 @@ def resampling(data1, data2, S=10000, testFunc=F_mean_diff_flat,
         permFunc: Function defining the way to permute the data. Should accept
                 one argument, the combined set of data. Default is random
                 shuffle.
+        adaptive: Cuts-off resampling early depending on significance.
 
     Returns:
         A tuple with the following entries::
@@ -252,7 +260,7 @@ def resampling(data1, data2, S=10000, testFunc=F_mean_diff_flat,
     count_utail = 0
     count_2tail = 0
 
-    test_list = numpy.zeros(S)
+    test_list = []
 
     n1 = len(data1)
     n2 = len(data2)
@@ -285,17 +293,24 @@ def resampling(data1, data2, S=10000, testFunc=F_mean_diff_flat,
         else:
             test_sample = 0
 
-        test_list[s] = test_sample
+        test_list.append(test_sample)
         if test_sample <= test_obs: count_ltail+=1
         if test_sample >= test_obs: count_utail+=1
         if abs(test_sample) >= abs(test_obs): count_2tail+=1
+
         s_performed+=1
+        if adaptive:
+            if s_performed == round(S*0.01) or s_performed == round(S*0.1) or s_performed == round(S*1):
+                    if count_2tail >= round(S*0.01*0.10):
+                        break
+    
+
 
     pval_ltail = count_ltail/float(s_performed)
     pval_utail = count_utail/float(s_performed)
     pval_2tail = count_2tail/float(s_performed)
 
-    return (test_obs, mean1, mean2, log2FC, pval_ltail, pval_utail,  pval_2tail)
+    return (test_obs, mean1, mean2, log2FC, pval_ltail, pval_utail,  pval_2tail, test_list)
 
 
 
