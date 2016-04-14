@@ -8,12 +8,14 @@ __pycache__/
 # Distribution / packaging
 .Python
 env/
+
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
+bin/
 lib/
 lib64/
 parts/
@@ -49,6 +51,14 @@ coverage.xml
 
 # Django stuff:
 *.log
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# Rope
+.ropeproject
 
 # Sphinx documentation
 docs/_build/
