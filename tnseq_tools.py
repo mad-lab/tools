@@ -3,7 +3,7 @@ import math
 import warnings
 import numpy
 import scipy.stats
-
+from functools import total_ordering
 
 try:
     import norm_tools
@@ -12,7 +12,7 @@ except ImportError:
     noNorm = True
     warnings.warn("Problem importing the norm_tools.py module. Read-counts will not be normalized.")
 
-
+@total_ordering
 class Gene:
     """This is a longer explanation, which may include math with latex syntax
     Then, you need to provide optional subsection in this order (just to be
@@ -61,10 +61,21 @@ class Gene:
         self.reads = numpy.array(reads)
         self.position = numpy.array(position, dtype=int)
         self.tosses = tossify(self.reads)
-        self.runs = runs(self.tosses)
+        try:
+            self.runs = runs(self.tosses)
+        except Exception as e:
+            print orf, name, self.tosses
+            raise e
+
         self.k = int(numpy.sum(self.tosses))
         self.n = len(self.tosses)
-        self.r = numpy.max(self.runs)
+        try:
+            self.r = numpy.max(self.runs)
+        except Exception as e:
+            print orf, name, self.tosses
+            print self.runs
+            raise e
+
         self.s = self.get_gap_span()
         self.t = self.get_gene_span()
 
@@ -76,12 +87,20 @@ class Gene:
         """Return a string representation of the object."""
         return "%s\t(%s)\tk=%d\tn=%d\tr=%d\ttheta=%1.5f" % (self.orf, self.name, self.k, self.n, self.r, self.theta())
 
+    def __eq__(self, other):
+        return self.orf == other.orf
+
+    def __lt__(self, other):
+        return self.orf < other.orf 
 
     def get_gap_span(self):
         """Returns the span of the maxrun of the gene (i.e. number of nucleotides)."""
         if len(self.position) > 0:
+            if self.r == 0:
+                return 0
             index = runindex(self.runs)
-            maxii = numpy.argmax(self.runs)
+            #maxii = numpy.argmax(self.runs)
+            maxii = numpy.argwhere(self.runs == numpy.max(self.runs)).flatten()[-1]
             runstart = index[maxii]
             runend = runstart + max(self.runs) - 1
             return self.position[runend] - self.position[runstart] + 2
@@ -158,11 +177,12 @@ class Genes:
         """Defines __str__ to print a generic str with the size of the list."""
         return "Genes Object (N=%d)" % len(self.genes)
     
-    def __init__(self, wigList, protTable, norm="nonorm", minread=1, ignoreCodon = True, nterm=0.0, cterm=0.0, include_nc = False):
+    def __init__(self, wigList, protTable, norm="nonorm", reps="All", minread=1, ignoreCodon = True, nterm=0.0, cterm=0.0, include_nc = False, data=[], position=[]):
         """Initializes the gene list based on the list of wig files and a prot_table."""
         self.wigList = wigList
         self.protTable = protTable
         self.norm = norm
+        self.reps = reps
         self.minread = minread
         self.ignoreCodon = ignoreCodon
         self.nterm = nterm
@@ -174,16 +194,21 @@ class Genes:
         self.genes = []
         
         orf2info = get_gene_info(self.protTable)
-        (data, position) = get_data(self.wigList)
+        if not numpy.any(data):
+            (data, position) = get_data(self.wigList)
         hash = get_pos_hash(self.protTable)
        
-        if not noNorm: 
+
+        if not noNorm:
             (data, factors) = norm_tools.normalize_data(data, norm, self.wigList, self.protTable)
         else:
             factors = []
-        
-        K,N = data.shape
+       
+        if reps.lower() != "all":
+            data = numpy.array([combine_replicates(data, method=reps)])
 
+        K,N = data.shape
+        
         orf2posindex = {}
         visited_list = []
         for i in range(N):
@@ -349,22 +374,24 @@ def tossify(data):
     reduced = numpy.sum(data,0)
     return numpy.zeros(N) + (numpy.sum(data, 0) > 0)
 
-
 def runs(data):
-    """Return list of all the runs of zero, given a list of counts."""
-    if len(data) == 0: return [0]
+    """Return list of all the runs of consecutive non-insertions."""
     runs = []
     current_r = 0
     for read in data:
         if read > 0: # If ending a run of zeros
-            #if current_r > 0: # If we were in a run, add to list
-            runs.append(current_r)
+            if current_r > 0: # If we were in a run, add to list
+                runs.append(current_r)
             current_r = 0
+            runs.append(current_r)
         else:
             current_r += 1
     # If we ended in a run, add it
     if current_r > 0:
         runs.append(current_r)
+
+    if not runs:
+        return [0]
     return runs
 
 def runindex(runs):
@@ -388,10 +415,12 @@ def get_data(wig_list):
     """ Returns a tuple of (data, position) containing a matrix of raw read counts, and list of coordinates. """
     K = len(wig_list)
     T = 0
+
+    if not wig_list:
+        return (numpy.zeros((1,0)), numpy.zeros(0))
+
     for line in open(wig_list[0]):
-        if line.startswith("#"): continue
-        if line.startswith("location"): continue
-        if line.startswith("variable"): continue
+        if line[0] not in "0123456789": continue
         T+=1
 
     data = numpy.zeros((K,T))
@@ -400,9 +429,7 @@ def get_data(wig_list):
         reads = []
         i = 0
         for line in open(path):
-            if line.startswith("#"): continue
-            if line.startswith("location"): continue
-            if line.startswith("variable"): continue
+            if line[0] not in "0123456789": continue
             tmp = line.split()
             pos = int(tmp[0])
             rd = float(tmp[1])
@@ -410,6 +437,47 @@ def get_data(wig_list):
             position[i] = pos
             i+=1
     return (data, position)
+
+
+def combine_replicates(data, method="Sum"):
+
+    if method == "Sum":
+        combined = numpy.round(numpy.sum(data,0))
+    elif method == "Mean":
+        combined = numpy.round(numpy.mean(data,0))
+    elif method == "TTRMean":
+        factors = transit_tools.TTR_factors(data)
+        data = factors * data
+        target_factors = transit_tools.norm_to_target(data, 100)
+        data = target_factors * data
+        combined = numpy.round(numpy.mean(data,0))
+    else:
+        combined = data[0,:]
+
+    return combined
+
+
+def get_wig_stats(path):
+    reads = []
+    for line in open(path):
+        if line[0] not in "0123456789": continue
+        tmp = line.split()
+        pos = int(tmp[0])
+        rd = float(tmp[1])
+        reads.append(rd)
+    reads = numpy.array(reads)
+
+    density = numpy.mean(reads>0)
+    meanrd = numpy.mean(reads)
+    nzmeanrd = numpy.mean(reads[reads>0])
+    nzmedianrd = numpy.median(reads[reads>0])
+    maxrd = numpy.max(reads)
+    totalrd = numpy.sum(reads)
+
+    skew = scipy.stats.skew(reads[reads>0])
+    kurtosis = scipy.stats.kurtosis(reads[reads>0])
+    return (density, meanrd, nzmeanrd, nzmedianrd, maxrd, totalrd, skew, kurtosis)
+
 
 
 def get_pos_hash(path):
@@ -439,6 +507,33 @@ def get_gene_info(path):
         strand = tmp[3]
         orf2info[orf] = (name, desc, start, end, strand)
     return orf2info
+
+def get_coordinate_map(galign_path, reverse=False):
+    c1Toc2 = {}
+    for line in open(galign_path):
+        if line.startswith("#"): continue
+        tmp = line.split()
+        star = line.strip().endswith("*")
+        leftempty = tmp[0].startswith("-")
+        rightempty = tmp[1].endswith("-")
+        if leftempty:
+            left = -1
+        else:
+            left = int(tmp[0])
+        if rightempty:
+            right = -1
+        elif leftempty:
+            right = int(tmp[1])
+        else:
+             right = int(tmp[2])
+            
+        if not reverse:
+            if not leftempty:
+                c1Toc2[left] = right
+        else:
+            if not rightempty:
+                 c1Toc2[right] = left    
+    return c1Toc2
 
 def maxrun(lst,item=0):
     best = 0
@@ -569,10 +664,17 @@ if __name__ == "__main__":
     print "#Run: %s" % G.global_run()
     print "#Theta: %1.4f" % G.global_theta()
     print "#Phi: %1.4f" % G.global_phi()
-    
-    griffin_results = griffin_analysis(G, G.global_theta())
+    print "#"
 
-    for i,gene in enumerate(G):
+    #g = G["Rv1968"]
+    #print g
+    #print g.runs
+    #print runindex(g.runs)
+    
+    #sys.exit()
+
+    griffin_results = griffin_analysis(G, G.global_theta())
+    for i,gene in enumerate(sorted(G)):
         pos = gene.position
         exprun, pval = griffin_results[i][-2:]
         print "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%1.1f\t%1.5f" % (gene.orf, gene.name, gene.k, gene.n, gene.r, gene.s, gene.t, exprun, pval)
