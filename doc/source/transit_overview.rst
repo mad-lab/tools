@@ -9,7 +9,7 @@ Overview
 + This is a software that can be used to analyze Tn-Seq datasets. It includes various statistical calculations of essentiality of genes or genomic regions (including conditional essentiality between 2 conditions). These methods were developed and tested as a collaboration between the Sassetti lab (UMass) and the Ioerger lab (Texas A). 
 
 .. image:: http://saclab.tamu.edu/essentiality/transit/images/tutorial_glyc_ctrl.png
-   :width: 400
+   :width: 600
    :align: center
 
 |
@@ -48,13 +48,13 @@ Overview
     + Track view shows you a visual representation of the read counts at each site at a locus of interest (for selected datasets) somewhat like IGV.
     
 .. image:: http://saclab.tamu.edu/essentiality/transit/images/track_view.png
-   :width: 400
+   :width: 600
    :align: center
 |
     + Scatter plots can show the correlation of counts between 2 datasets.
 
 .. image:: http://saclab.tamu.edu/essentiality/transit/images/scatter.png
-   :width: 400
+   :width: 600
    :align: center
 
 
@@ -62,12 +62,12 @@ Overview
     + Volcano plots can be used to visualize the results of resampling and assess the distribution between over- and under-represented genes in condition B vs. condition A. In addition you can look at histogram of the re-sample distributions for each gene.
 
 .. image:: http://saclab.tamu.edu/essentiality/transit/images/result_volcano_graph.png
-   :width: 400
+   :width: 600
    :align: center
 
 
 .. image:: http://saclab.tamu.edu/essentiality/transit/images/result_table_histogram.png
-   :width: 400
+   :width: 600
    :align: center
 
 
