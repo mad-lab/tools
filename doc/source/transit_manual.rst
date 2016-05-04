@@ -10,8 +10,8 @@ Overview
 
 + This is a software that can be used to analyze Tn-Seq datasets. It includes various statistical calculations of essentiality of genes or genomic regions (including conditional essentiality between 2 conditions). These methods were developed and tested as a collaboration between the Sassetti lab (UMass) and the Ioerger lab (Texas A). 
 
-.. thumbnail:: http://saclab.tamu.edu/essentiality/transit/images/tutorial_glyc_ctrl.png
-   :width: 70%
+.. image:: http://saclab.tamu.edu/essentiality/transit/images/tutorial_glyc_ctrl.png
+   :scale: 100
    :align: center
 
 |
