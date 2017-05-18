@@ -34,7 +34,7 @@ def main(args, kwargs):
     # Data processing
     (data, position) = tnseq_tools.get_data(wiglist)
     (norm_data, factors) = norm_tools.normalize_data(data, method=norm_method)
-    G = tnseq_tools.Genes(wiglist, annotation, minread=1, ignoreCodon=False, nterm=0.0, cterm=0.0, data=wiglist, position=position)
+    G = tnseq_tools.Genes(wiglist, annotation, minread=1, ignoreCodon=False, nterm=0.0, cterm=0.0, data=norm_data, position=position)
 
     
 
